@@ -778,10 +778,6 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 }
 
 </style>
-
-<script src="nano_banana_local_training.js"></script>
-<script src="nano_banana_local_brain.js"></script>
-
 </head>
 <body>
 
@@ -2083,7 +2079,7 @@ function startApp(){
   else if(activeModel==='openrouter'){badge='openrouter / flash';sub='openrouter · online';}
   else if(activeModel==='custom'){badge=localStorage.getItem('nb_custom_model')||'custom';sub='custom · online';}
   else if(activeModel==='openai'){badge=openaiModel;sub='openai · online';}
-  else if(activeModel==='nano_local'){badge='Nano Banana CPU';sub='local · WASM · sem API';}
+  else if(activeModel==='nano_local'){badge='Nano Banana Oficial';sub='local · offline';}
   else {badge=claudeModel;sub='claude · online';}
   document.getElementById('modelBadge').textContent=badge;
   document.getElementById('modelSub').textContent=sub;
@@ -3078,34 +3074,499 @@ function buildGeminiThinkingConfig(modelName, thinkingBudget){
 
 /* ============================================================
    NANO BANANA OFICIAL — MOTOR LOCAL OFFLINE
-   Sem API, sem chave e sem dependência externa. É deliberadamente
-   leve: usa contexto local, memória/projeto e um conjunto de intenções.
+   Sem API, sem chave e sem dependência externa. Roda 100% aqui no HTML:
+   conversa (saudação, ajuda, piada, identidade...), matemática, sorteio
+   (moeda/dado/número aleatório), texto (contar/inverter/maiúsculo/
+   minúsculo), datas (dia da semana / quantos dias faltam) e consulta ao
+   contexto local do projeto.
+
+   A parte de CONVERSA (padrões + respostas) fica na lista logo abaixo,
+   NANO_LOCAL_TREINAMENTO — pra ensinar algo novo é só copiar um bloco
+   { id, match, respostas }. "q" sempre chega SEM ACENTO e em minúsculo.
+
+   Esse mesmo conteúdo também existe como dois arquivos separados
+   (nano-banana-treinamento.js e nano-banana-motor-local.js), mais fáceis
+   de editar fora deste HTML gigante — é só colar o conteúdo atualizado
+   de volta aqui depois.
    ============================================================ */
-function nanoLocalNormalize(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();}
-function nanoLocalLastUser(messages){const a=(messages||[]).filter(x=>x&&x.role==='user'); const x=a[a.length-1]; return typeof x?.content==='string'?x.content:'';}
+window.NANO_LOCAL_TREINAMENTO = [
+
+  // ---------------------------- SOCIAL ----------------------------
+  {
+    id: 'saudacao',
+    match: q => /^(oi+|ola+|hey|e ?ai|opa|salve|fala( ai)?|bom dia|boa tarde|boa noite)\b/.test(q),
+    respostas: [
+      'Oi! 🍌 Sou o Nano Banana Oficial, rodando local neste dispositivo — sem chave de API.',
+      'E aí! 🍌 Modo local ativado: sem internet, sem servidor externo, tudo rodando aqui no aparelho.',
+      'Opa, beleza? Tô no modo offline, pronto pra ajudar no que for simples. 🍌'
+    ]
+  },
+  {
+    id: 'despedida',
+    match: q => /^(tchau|ate mais|ate logo|falou|flw|vlw( ate| falou)?|xau|ate breve)\b/.test(q),
+    respostas: [
+      'Falou! 🍌 Qualquer coisa é só chamar de novo.',
+      'Até mais — continuo aqui, local e sem gastar API nenhuma. 🍌',
+      'Tchau! 👋'
+    ]
+  },
+  {
+    id: 'agradecimento',
+    match: q => /^(obrigad[oa]o?|valeu|vlw|brigad[ao]o?|obg|thanks)\b/.test(q),
+    respostas: [
+      'De nada! 🍌',
+      'Disponha — de graça, sem gastar API nenhuma.',
+      'Sempre que precisar!'
+    ]
+  },
+  {
+    id: 'como_vai',
+    match: q => /(tudo bem|tudo certo|como (voce|vc) (esta|ta))/.test(q) || /^(de boa|suave)\??$/.test(q),
+    respostas: [
+      'Tudo certo por aqui, rodando 100% local. 🍌 E você, como tá?',
+      'De boa! Sem depender de servidor nenhum agora. E aí?'
+    ]
+  },
+
+  // ------------------------- SOBRE A IA / APP -------------------------
+  {
+    id: 'identidade_capacidades',
+    match: q => /(quem e voce|quem e vc|o que voce e|o que vc e|seu nome|quem te (criou|fez|programou)|o que voce consegue|capacidades|o que voce faz|no que voce (pode|consegue) ajudar)/.test(q),
+    respostas: [
+      'Sou o **Nano Banana Oficial**, o modo local do Nano Banana AI: converso, calculo, sorteio número/moeda/dado, mexo com texto (contar, inverter, maiúsculo/minúsculo), calculo datas e consulto o contexto salvo do app — tudo sem internet e sem chave de API. Pra programação avançada ou conhecimento geral, troca pra um provedor com API nas configurações.',
+      'Sou a versão local da IA deste app — feita pra funcionar mesmo sem internet e sem API key. Faço tarefas objetivas (cálculo, texto, data, sorteio) e converso o básico. O resto fica por conta de um provedor remoto.'
+    ]
+  },
+  {
+    id: 'como_funciona_local',
+    match: q => /(sem internet|offline|sem api|sem chave|modo local)/.test(q) && /(como|funciona)\b/.test(q),
+    respostas: [
+      'Este modo não chama Gemini, GPT, Claude nem nenhum servidor. Toda resposta é gerada aqui mesmo, pelo motor local do próprio HTML, reconhecendo padrões no que você escreve. A memória e os projetos continuam sendo dados locais também.'
+    ]
+  },
+  {
+    id: 'sobre_app',
+    match: q => /(que app e esse|pra que serve esse app|pra que serve o app|quem fez esse app|o que e o nano banana)/.test(q),
+    respostas: [
+      'Este é o **Nano Banana AI** 🍌 — um chat de IA que roda como um único arquivo HTML, com suporte a vários provedores (Gemini, Claude, OpenAI etc.) e este modo local, sem API, pra tarefas simples.'
+    ]
+  },
+  {
+    id: 'ajuda',
+    match: q => /(ajuda|help|^comando|comandos|configuracoes|configuracao)\b/.test(q),
+    respostas: [
+      'Nesse modo local eu ajudo com: conversa básica, cálculos ("quanto é 12*7"), sorteios (moeda, dado, número aleatório), texto ("quantas letras tem banana", "inverte o texto banana", "maiusculo: banana"), datas ("que dia da semana é 25/12", "quantos dias faltam para 31/12"), consulta ao contexto salvo do projeto e piadas. Pra geração avançada, troca de provedor lá nas configurações.'
+    ]
+  },
+
+  // ------------------------------ TOM ------------------------------
+  {
+    id: 'elogio',
+    match: q => /(voce e (incrivel|otimo|otima|muito bom|top|show|demais)|adorei (voce|isso)|voce arrasa|muito bom mesmo)/.test(q),
+    respostas: [
+      'Valeu! 🍌 Rodando local e ainda fico feliz com elogio.',
+      'Obrigado! Fico aqui, sem custo de API, pra ajudar no que der.'
+    ]
+  },
+  {
+    id: 'frustracao',
+    match: q => /(voce e (burr[oa]|inutil)|nao (presta|funciona|serve)|(odeio|detesto) (voce|isso)|que (droga|porcaria|bosta))/.test(q),
+    respostas: [
+      'Entendo a frustração. Esse modo local é propositalmente simples — pra tarefas mais complexas ou respostas mais completas, vale trocar pra um provedor com API nas configurações.',
+      'Desculpa não ajudar como esperado — no modo local eu só dou conta do básico. Pra algo mais robusto, ativa Gemini, Claude ou outro provedor.'
+    ]
+  },
+  {
+    id: 'piada',
+    match: q => /(conta (uma )?piada|sabe (alguma )?piada|me faz rir|uma piada)/.test(q),
+    respostas: [
+      'Por que o arquivo HTML foi ao psicólogo? Porque tinha muitas tags e não conseguia se fechar. 🍌',
+      'Como a banana avisa que ficou sem internet? Ela diz que tá "offline", mas nunca amarela.',
+      'Por que o par não briga com o ímpar? Porque os dois sempre se dividem bem.',
+      'Qual é o hobby do bit? Trocar de ideia toda hora — de 0 pra 1, de 1 pra 0.'
+    ]
+  },
+
+  // ------------------------ FORA DO ALCANCE LOCAL ------------------------
+  {
+    id: 'clima',
+    match: q => /(que tempo (vai fazer|esta|ta)|previsao do tempo|vai chover)/.test(q),
+    respostas: [
+      'Não consigo checar o clima real no modo local — isso exige internet. Troca pra um provedor com API (e busca na web ativa) pra essa resposta.'
+    ]
+  },
+  {
+    id: 'noticias',
+    match: q => /(noticia|noticias de hoje|o que esta acontecendo no mundo)/.test(q),
+    respostas: [
+      'Notícia em tempo real precisa de internet — não dá pra buscar isso no modo local. Troca de provedor e ativa a busca na web pra essa resposta.'
+    ]
+  },
+
+  // --------------------- RESPOSTAS CURTAS SOLTAS ---------------------
+  {
+    id: 'confirmacao_simples',
+    match: q => /^(sim|ok|okay|blz|beleza|certo|entendi|fechou)\.?$/.test(q),
+    respostas: ['Show! 🍌', 'Fechado!', 'Beleza, é só chamar.']
+  },
+  {
+    id: 'negacao_simples',
+    match: q => /^(nao|n)\.?$/.test(q),
+    respostas: ['Sem problema — é só me dizer o que prefere. 🍌', 'Ok, sem essa então.']
+  }
+];
+
+function nanoLocalNormalize(v){
+  return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+}
+function nanoLocalLastUser(messages){
+  const a=(messages||[]).filter(x=>x&&x.role==='user');
+  const x=a[a.length-1];
+  return typeof x?.content==='string'?x.content:'';
+}
+
+/* ---------- matemática segura (só dígito/operador passa pro eval) ---------- */
 function nanoLocalSafeMath(text){
   const t=String(text).replace(/,/g,'.').replace(/[^0-9+\-*/().%\s]/g,'').trim();
   if(!t||!/^[0-9+\-*/().%\s]+$/.test(t)||t.length>100)return null;
   try{const v=Function('"use strict";return ('+t.replace(/%/g,'/100')+')')(); return Number.isFinite(v)?String(v):null;}catch{return null;}
 }
-function nanoLocalFileAnswer(q){
-  if(typeof findProjectFile!=='function'||!currentChatId)return '';
-  const n=q.match(/(?:arquivo|file)\s+[`"']?([\w.\-/]+)[`"']?/i)?.[1];
-  if(!n)return '';
-  try{const f=findProjectFile(n,currentChatId); if(f){const vs=f.versions||[]; const original=vs.find(v=>v.original||/original/i.test(v.label||v.version||'')); return `Encontrei o arquivo **${n}** no projeto. Ele tem ${vs.length||1} versão(ões).${original?' A versão ORIGINAL também está preservada localmente.':''}`;}}catch{}
+function nanoLocalMatematica(raw, q){
+  // Checa o gatilho no texto NORMALIZADO (sem acento) — "quanto é" só bate aqui porque "é"
+  // já virou "e". Testar isso direto no "raw" (com acento) era o bug: o regex sem acento
+  // nunca batia com o texto acentuado, e a conta parava de funcionar.
+  const temGatilho = /^(quanto e|quanto da|calcule|calcula|resultado de|qual (?:e|eh) o resultado de)\b/.test(q);
+  const soExpressao = /^[\d+\-*/().%,\s]+$/.test(raw.trim()); // mensagem inteira já é só números/operadores
+  // Sem gatilho explícito e sem ser uma expressão pura, não arrisca — evita que um número
+  // solto no meio de outra frase (ex: "role um dado de 20 lados", data "25/12/2026", "17 é
+  // primo") seja lido como conta de matemática. nanoLocalSafeMath já limpa letras sozinho,
+  // então nem precisa tirar o prefixo antes de mandar pra ele.
+  if(!temGatilho && !soExpressao) return '';
+  const resultado = nanoLocalSafeMath(raw);
+  return resultado ? `O resultado é **${resultado}**.` : '';
+}
+
+/* ---------- moeda / dado ---------- */
+function nanoLocalMoedaDado(q){
+  if(/cara ou coroa|jog(?:ar|a|ue) (?:uma )?moeda|moeda ao ar/.test(q)){
+    return `**${Math.random()<0.5?'Cara':'Coroa'}** 🪙`;
+  }
+  const dm = q.match(/d(?:ado)?\s*(?:de\s*)?(\d{1,3})\s*(?:lados|faces)?/) || q.match(/\bd(\d{1,3})\b/);
+  if(/\bdado\b|role um dado|rola(?:r)? um dado/.test(q) || dm){
+    const lados = dm ? parseInt(dm[1],10) : 6;
+    if(lados>=2 && lados<=1000){
+      const resultado = 1 + Math.floor(Math.random()*lados);
+      return `Rolei um dado de **${lados}** lados: deu **${resultado}**. 🎲`;
+    }
+  }
   return '';
 }
-function nanoLocalRespond(messages){
-  if(window.NanoBananaLocalBrain && typeof window.NanoBananaLocalBrain.respond==='function'){
-    return window.NanoBananaLocalBrain.respond(messages);
-  }
-  return 'O cérebro local não foi carregado. Verifique se nano_banana_local_brain.js está na mesma pasta deste HTML.';
+
+/* ---------- número aleatório num intervalo ---------- */
+function nanoLocalNumeroAleatorio(q){
+  const m = q.match(/(?:numero aleatorio|sorte(?:ia|ar|io))[^\d-]*(-?\d+)[^\d-]+(-?\d+)/);
+  if(!m) return '';
+  let a=parseInt(m[1],10), b=parseInt(m[2],10);
+  if(a>b) [a,b]=[b,a];
+  if(b-a>1e9) return 'Esse intervalo é grande demais pra sortear localmente.';
+  const r = a + Math.floor(Math.random()*(b-a+1));
+  return `Número sorteado entre **${a}** e **${b}**: **${r}**`;
 }
-window.nanoBananaLocalStatus=function(){return window.NanoBananaLocalBrain?.status||'motor local indisponível';};
-window.preloadNanoBananaLocalModel=function(){window.NanoBananaLocalBrain?.loadNeuralModel?.();};
+
+/* ---------- par/ímpar e número primo ---------- */
+function nanoLocalEhPrimo(n){
+  if(n<2) return false;
+  if(n%2===0) return n===2;
+  for(let i=3;i*i<=n;i+=2) if(n%i===0) return false;
+  return true;
+}
+function nanoLocalParidadePrimo(raw, q){
+  if(/par ou impar|impar ou par/.test(q)){
+    const nm = raw.match(/-?\d+/);
+    if(nm){ const n=parseInt(nm[0],10); return `**${n}** é **${n%2===0?'par':'ímpar'}**.`; }
+  }
+  // "primo" também é "cousin" em português — só interpreta como número primo se vier
+  // colado a um dígito (ex: "17 e primo") ou junto da palavra "numero", nunca sozinho.
+  if(/numero primo|\d\s*e\s*primo|\d\s*eh\s*primo|primo\?/.test(q)){
+    const nm = raw.match(/-?\d+/);
+    if(nm){
+      const n = Math.abs(parseInt(nm[0],10));
+      if(n>1e12) return 'Número grande demais pra verificar localmente.';
+      return `**${n}** ${nanoLocalEhPrimo(n)?'é':'não é'} primo.`;
+    }
+  }
+  return '';
+}
+
+/* ---------- utilidades de texto ---------- */
+function nanoLocalLimparAlvo(s){
+  return String(s||'').trim().replace(/^["'“”]+|["'“”.,!?]+$/g,'').trim();
+}
+function nanoLocalTextoUtil(raw){
+  let m;
+  if((m = raw.match(/quantas letras (?:tem|possui) (.+)/i)) || (m = raw.match(/quantos caracteres (?:tem|possui) (.+)/i))){
+    const alvo = nanoLocalLimparAlvo(m[1]);
+    if(alvo) return `"${alvo}" tem **${alvo.length}** caractere(s).`;
+  }
+  if((m = raw.match(/quantas palavras (?:tem|possui) (.+)/i))){
+    const alvo = nanoLocalLimparAlvo(m[1]);
+    if(alvo) return `"${alvo}" tem **${alvo.split(/\s+/).filter(Boolean).length}** palavra(s).`;
+  }
+  if((m = raw.match(/invert[ae]r?\s+(?:o texto\s+)?(.+)/i))){
+    const alvo = nanoLocalLimparAlvo(m[1]);
+    if(alvo) return `Invertido: **${alvo.split('').reverse().join('')}**`;
+  }
+  if((m = raw.match(/mai[uú]sculo[:\s]+(.+)/i))){
+    const alvo = nanoLocalLimparAlvo(m[1]);
+    if(alvo) return `Em maiúsculo: **${alvo.toUpperCase()}**`;
+  }
+  if((m = raw.match(/min[uú]sculo[:\s]+(.+)/i))){
+    const alvo = nanoLocalLimparAlvo(m[1]);
+    if(alvo) return `Em minúsculo: **${alvo.toLowerCase()}**`;
+  }
+  return '';
+}
+
+/* ---------- datas ---------- */
+function nanoLocalDataCalculo(raw, q){
+  if(/que horas|hora atual|hora agora/.test(q) && !/dia da semana/.test(q)){
+    return `Agora são **${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}** no horário do dispositivo.`;
+  }
+  const dm = raw.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/);
+  if(dm && (/dia da semana/.test(q) || /faltam/.test(q))){
+    const dia=+dm[1], mes=+dm[2], ano = dm[3] ? (dm[3].length===2 ? 2000+ +dm[3] : +dm[3]) : new Date().getFullYear();
+    const d = new Date(ano, mes-1, dia);
+    if(d.getDate()!==dia || d.getMonth()!==mes-1){
+      return 'Essa data não parece válida — confere o formato DD/MM/AAAA.';
+    }
+    if(/dia da semana/.test(q)){
+      const dias=['domingo','segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado'];
+      return `**${String(dia).padStart(2,'0')}/${String(mes).padStart(2,'0')}/${ano}** cai num(a) **${dias[d.getDay()]}**.`;
+    }
+    const hoje = new Date(); hoje.setHours(0,0,0,0); d.setHours(0,0,0,0);
+    const diffDias = Math.round((d-hoje)/86400000);
+    if(diffDias>0) return `Faltam **${diffDias}** dia(s) para ${String(dia).padStart(2,'0')}/${String(mes).padStart(2,'0')}/${ano}.`;
+    if(diffDias<0) return `Essa data já passou há **${Math.abs(diffDias)}** dia(s).`;
+    return 'É hoje! 🍌';
+  }
+  if(/data de hoje|que dia e hoje|hoje e dia|em que mes estamos|que ano e/.test(q)){
+    return `Hoje é **${new Date().toLocaleDateString('pt-BR')}**.`;
+  }
+  return '';
+}
+
+/* ---------- arquivo do projeto (mesmo comportamento de antes) ---------- */
+function nanoLocalFileAnswer(raw){
+  if(typeof findProjectFile!=='function'||!currentChatId)return '';
+  const n=raw.match(/(?:arquivo|file)\s+[`"']?([\w.\-/]+)[`"']?/i)?.[1];
+  if(!n)return '';
+  try{
+    const f=findProjectFile(n,currentChatId);
+    if(f){
+      const vs=f.versions||[];
+      const original=vs.find(v=>v.original||/original/i.test(v.label||v.version||''));
+      return `Encontrei o arquivo **${n}** no projeto. Ele tem ${vs.length||1} versão(ões).${original?' A versão ORIGINAL também está preservada localmente.':''}`;
+    }
+  }catch{}
+  return '';
+}
+
+/* ============================================================
+   NANO BANANA OFICIAL — IA REAL LOCAL (WebLLM, opcional)
+   Modelo de linguagem de verdade, local, via WebGPU — sem chave de API.
+   Duas exigências do PRÓPRIO NAVEGADOR (não dá pra contornar em código):
+     1) Precisa de HTTPS ou http://localhost. Abrir o arquivo direto
+        (file://, inclusive o "abrir com" do Android) NÃO FUNCIONA.
+     2) Precisa de WebGPU (Chrome/Edge 113+, Chrome Android 121+, Safari
+        recente). Sem isso, sem fallback pra rodar modelo — mas o app
+        continua funcionando normal com o motor de padrões abaixo.
+   Baixa o modelo (uma vez) e guarda em cache no navegador; depois disso
+   carrega rápido mesmo offline, até o navegador limpar o cache.
+   Detalhes completos: nano-banana-ia-real.js (arquivo separado).
+   ============================================================ */
+
+const NANO_LLM_MODELOS = [
+  { id:'leve',        nome:'Leve · ~130 MB',        modelo:'SmolLM2-360M-Instruct-q4f16_1-MLC' },
+  { id:'equilibrado', nome:'Equilibrado · ~900 MB',  modelo:'Llama-3.2-1B-Instruct-q4f16_1-MLC' },
+  { id:'capaz',       nome:'Mais capaz · ~2,2 GB',   modelo:'Llama-3.2-3B-Instruct-q4f16_1-MLC' },
+];
+
+window.nanoLLM = {
+  engine: null,
+  carregando: false,
+  nivelCarregado: null,
+  nivelSelecionado: (typeof localStorage!=='undefined' && localStorage.getItem('nb_llm_nivel')) || 'equilibrado',
+};
+
+function nanoLLMSuportado(){
+  return typeof window!=='undefined' && !!window.isSecureContext && !!(typeof navigator!=='undefined' && navigator.gpu);
+}
+
+function nanoLLMMotivoIndisponivel(){
+  if(typeof window==='undefined' || !window.isSecureContext){
+    return 'Precisa rodar via HTTPS ou http://localhost — abrir o arquivo direto (file://) não funciona pra WebGPU.';
+  }
+  if(!(typeof navigator!=='undefined' && navigator.gpu)){
+    return 'Este navegador/dispositivo não tem WebGPU disponível (ou está desatualizado).';
+  }
+  return '';
+}
+
+function nanoLLMAtualizarUI(){
+  const st = window.nanoLLM;
+  try{
+    document.querySelectorAll('[data-sg-llm]').forEach(e=>e.classList.toggle('active', e.dataset.sgLlm===st.nivelSelecionado));
+    const texto = document.getElementById('nanoLlmStatus');
+    if(texto && !st.carregando){
+      if(st.engine && st.nivelCarregado===st.nivelSelecionado){
+        texto.textContent = 'Modelo carregado ✅ — o modo local já responde com IA real.';
+      }else if(st.engine){
+        texto.textContent = `Modelo "${st.nivelCarregado}" carregado. Clique em carregar de novo pra trocar de nível.`;
+      }else{
+        const motivo = nanoLLMMotivoIndisponivel();
+        texto.textContent = motivo ? ('⚠️ ' + motivo) : 'Nenhum modelo carregado ainda — clique em "Carregar modelo".';
+      }
+    }
+  }catch{}
+}
+
+function nanoLLMSelecionarNivel(id){
+  window.nanoLLM.nivelSelecionado = id;
+  try{ localStorage.setItem('nb_llm_nivel', id); }catch{}
+  nanoLLMAtualizarUI();
+}
+
+async function nanoLLMCarregar(){
+  const st = window.nanoLLM;
+  if(st.carregando) return;
+  const barra = document.getElementById('nanoLlmBarra');
+  const texto = document.getElementById('nanoLlmStatus');
+
+  const motivo = nanoLLMMotivoIndisponivel();
+  if(motivo){
+    if(texto) texto.textContent = '⚠️ ' + motivo;
+    window.showToast?.(motivo);
+    return;
+  }
+
+  const cfg = NANO_LLM_MODELOS.find(m=>m.id===st.nivelSelecionado) || NANO_LLM_MODELOS[1];
+  st.carregando = true;
+  if(texto) texto.textContent = 'Carregando biblioteca...';
+  if(barra) barra.style.width = '2%';
+
+  try{
+    if(!window.__webllmMod){
+      window.__webllmMod = await import('https://esm.run/@mlc-ai/web-llm');
+    }
+    const { CreateMLCEngine } = window.__webllmMod;
+    const engine = await CreateMLCEngine(cfg.modelo, {
+      initProgressCallback: (p)=>{
+        const pct = Math.round((p?.progress||0)*100);
+        if(barra) barra.style.width = pct + '%';
+        if(texto) texto.textContent = (p?.text || 'Carregando modelo...') + ` (${pct}%)`;
+      }
+    });
+    st.engine = engine;
+    st.nivelCarregado = cfg.id;
+    if(barra) barra.style.width = '100%';
+    window.showToast?.('Modelo de IA real carregado — o modo local agora responde com IA de verdade.');
+  }catch(e){
+    const msg = String((e && e.message) || e);
+    let amigavel = 'Não consegui carregar o modelo: ' + msg;
+    if(/webgpu/i.test(msg)) amigavel = 'O navegador não conseguiu iniciar o WebGPU. ' + (nanoLLMMotivoIndisponivel() || 'Verifica se o navegador está atualizado e tenta de novo.');
+    if(texto) texto.textContent = '⚠️ ' + amigavel;
+    if(barra) barra.style.width = '0%';
+    window.showToast?.(amigavel);
+  }finally{
+    st.carregando = false;
+    nanoLLMAtualizarUI();
+  }
+}
+
+/* Chamada pelo orquestrador (nanoLocalRespond). Devolve null se não tiver
+   modelo carregado ou se algo der errado — aí quem chamou cai pra base de
+   treinamento/fallback normal, sem travar o chat. */
+async function nanoLLMResponder(messages){
+  const st = window.nanoLLM;
+  if(!st.engine) return null;
+  const msgsFormatadas = (messages||[])
+    .filter(m => m && (m.role==='user' || m.role==='assistant' || m.role==='system') && typeof m.content==='string')
+    .slice(-12); // modelo pequeno e local — contexto curto é suficiente e mais rápido
+  try{
+    const resposta = await st.engine.chat.completions.create({
+      messages: msgsFormatadas,
+      temperature: 0.7,
+      max_tokens: 400,
+    });
+    const texto = resposta?.choices?.[0]?.message?.content;
+    return (texto && texto.trim()) ? texto.trim() : null;
+  }catch(e){
+    console.error('Nano LLM local — erro ao gerar resposta:', e);
+    return null;
+  }
+}
+
+/* ---------- orquestrador principal ---------- */
+async function nanoLocalRespond(messages){
+  const raw = nanoLocalLastUser(messages);
+  const q = nanoLocalNormalize(raw);
+  const project = !!(typeof isCurrentChatProject!=='undefined' && isCurrentChatProject);
+
+  if(!q) return 'Tô aqui 🍌. Pode falar comigo — estou rodando no modo local, sem API.';
+
+  // 1) Handlers "de código": cálculo, sorteio, texto, datas, arquivo do projeto.
+  //    Ficam ANTES da IA real de propósito — um modelo pequeno erra conta e data
+  //    com facilidade; código determinístico não erra.
+  const handlers = [
+    () => nanoLocalMoedaDado(q),
+    () => nanoLocalNumeroAleatorio(q),
+    () => nanoLocalParidadePrimo(raw, q),
+    () => nanoLocalTextoUtil(raw),
+    () => nanoLocalDataCalculo(raw, q),
+    () => nanoLocalMatematica(raw, q),
+    () => nanoLocalFileAnswer(raw),
+  ];
+  for(const h of handlers){
+    let out=''; try{ out = h(); }catch{ out=''; }
+    if(out) return out;
+  }
+
+  // 2) Pergunta sobre projeto/memória (mesmo comportamento de antes).
+  if(project && /projeto|memoria|arquivos|scripts|bug|progresso/.test(q)){
+    let extra='';
+    try{ extra = typeof projectKnowledgeBlock==='function' ? projectKnowledgeBlock(raw).replace(/\s+/g,' ').slice(0,700) : ''; }catch{}
+    return `Estou no **modo local do projeto** 🍌. ${extra?'Tenho o índice/contexto local disponível. ':''}Posso consultar o que estiver salvo neste dispositivo, mas não tenho o conhecimento geral de um modelo remoto.`;
+  }
+
+  // 3) IA real local (WebLLM), só se já estiver carregada (arquivo
+  //    nano-banana-ia-real.js). Se não tiver, ou se der erro, cai pra base
+  //    de treinamento normal — nunca trava o chat.
+  if(typeof nanoLLMResponder === 'function' && window.nanoLLM && window.nanoLLM.engine){
+    let respostaIA = null;
+    try{ respostaIA = await nanoLLMResponder(messages); }catch{ respostaIA = null; }
+    if(respostaIA) return respostaIA;
+  }
+
+  // 4) Base de treinamento (conversa, identidade, ajuda, piada etc.).
+  const base = Array.isArray(window.NANO_LOCAL_TREINAMENTO) ? window.NANO_LOCAL_TREINAMENTO : [];
+  for(const intent of base){
+    try{
+      if(intent && typeof intent.match==='function' && intent.match(q)){
+        const respostas = Array.isArray(intent.respostas) && intent.respostas.length ? intent.respostas : null;
+        if(respostas) return respostas[Math.floor(Math.random()*respostas.length)];
+      }
+    }catch{}
+  }
+
+  // 5) Fallback final (mesmo espírito do comportamento anterior).
+  const dicaIA = (typeof nanoLLMSuportado==='function' && nanoLLMSuportado() && !(window.nanoLLM && window.nanoLLM.engine))
+    ? ' Dá pra carregar um modelo de IA real nas configurações pra respostas melhores.'
+    : '';
+  return `Entendi: "${raw.slice(0,180)}". 🍌 Estou no modo local, então não tenho um modelo remoto pra gerar uma resposta longa. Posso lidar com cálculos, sorteios, texto, datas e o contexto já salvo no app.${dicaIA} Para uma resposta de IA completa, selecione um provedor com API.`;
+}
 async function callAI(messages, tokens, system, retries=2, thinkingBudget=-1, signal=null){
   const apiMessages=buildApiHistory(messages);
-  if(activeModel==='nano_local'){ if(signal?.aborted) throw new DOMException('Aborted','AbortError'); return await Promise.resolve(nanoLocalRespond(messages)); }
+  if(activeModel==='nano_local'){ await new Promise(r=>setTimeout(r,80)); if(signal?.aborted) throw new DOMException('Aborted','AbortError'); return nanoLocalRespond(messages); }
   try{
     let finalSystem = system + '\n\n' + POWER_STYLE[power];
     const customInsts = loadInstructions();
@@ -4645,6 +5106,19 @@ Você está em uma conversa por voz em tempo real. Responda como um assistente c
             <div class="setup-label" style="margin-top:4px;">MODELO</div>
             <input class="setup-input" type="text" id="settingsCustomModelName" placeholder="Ex: meta-llama/llama-3-8b-instruct" autocomplete="off">
           </div>
+          <div id="settingsNanoLLMRow" class="settings-provider-model-row" style="display:none;flex-direction:column;gap:6px;">
+            <div class="setup-label">IA REAL LOCAL (OPCIONAL — BAIXA UM MODELO NO DISPOSITIVO)</div>
+            <div class="model-toggle settings-model-toggle" style="flex-wrap:wrap;gap:5px;">
+              <button class="mtog" data-sg-llm="leve" onclick="nanoLLMSelecionarNivel('leve')">Leve · ~130 MB</button>
+              <button class="mtog" data-sg-llm="equilibrado" onclick="nanoLLMSelecionarNivel('equilibrado')">Equilibrado · ~900 MB</button>
+              <button class="mtog" data-sg-llm="capaz" onclick="nanoLLMSelecionarNivel('capaz')">Mais capaz · ~2,2 GB</button>
+            </div>
+            <div style="background:rgba(128,128,128,.25);border-radius:6px;height:8px;overflow:hidden;">
+              <div id="nanoLlmBarra" style="background:#7cc576;height:100%;width:0%;transition:width .2s;"></div>
+            </div>
+            <div id="nanoLlmStatus" class="setup-hint">Precisa de HTTPS ou localhost — abrir o arquivo direto (file://) não roda WebGPU. Precisa também de um navegador com WebGPU.</div>
+            <button class="start-btn" style="padding:8px;font-size:.9em;" onclick="nanoLLMCarregar()" type="button">⬇️ Carregar modelo</button>
+          </div>
           <div class="key-card settings-key-card">
             <div class="key-card-header"><div class="key-card-icon">🔑</div><div class="setup-label" id="settingsKeyLabel" style="margin:0;">GOOGLE GEMINI API KEY</div></div>
             <div class="setup-input-row"><input class="setup-input" type="password" id="settingsApiKeyInput" placeholder="Cole sua chave aqui..." autocomplete="off"><button class="eye-btn" onclick="toggleSettingsKeyEye()">👁</button></div>
@@ -4950,6 +5424,8 @@ document.addEventListener('DOMContentLoaded',()=>{
     document.getElementById('settingsClaudeModelRow').style.display=m==='claude'?'block':'none';
     document.getElementById('settingsOpenAIModelRow').style.display=m==='openai'?'block':'none';
     document.getElementById('settingsCustomProviderRow').style.display=m==='custom'?'flex':'none';
+    document.getElementById('settingsNanoLLMRow').style.display=m==='nano_local'?'flex':'none';
+    if(m==='nano_local' && typeof nanoLLMAtualizarUI==='function') nanoLLMAtualizarUI();
     document.getElementById('settingsLocalAiCard').classList.toggle('active',m==='nano_local');
     const h=m==='nano_local'?['NANO BANANA OFICIAL','Sem chave API','Funciona localmente neste dispositivo.']: (hints[m]||hints.gemini); document.getElementById('settingsKeyLabel').textContent=h[0]; document.getElementById('settingsApiKeyInput').placeholder=h[1]; document.getElementById('settingsApiKeyInput').value=localStorage.getItem('nb_key_'+m)||''; document.getElementById('settingsKeyHint').innerHTML=h[2];
     document.getElementById('settingsCustomBaseUrl').value=localStorage.getItem('nb_custom_url')||'https://openrouter.ai/api/v1'; document.getElementById('settingsCustomModelName').value=localStorage.getItem('nb_custom_model')||'';
