@@ -3371,43 +3371,56 @@ function nanoLocalFileAnswer(raw){
   return '';
 }
 
-/* ============================================================
-   NANO BANANA OFICIAL — IA REAL LOCAL (WebLLM, opcional)
-   Modelo de linguagem de verdade, local, via WebGPU — sem chave de API.
-   Duas exigências do PRÓPRIO NAVEGADOR (não dá pra contornar em código):
-     1) Precisa de HTTPS ou http://localhost. Abrir o arquivo direto
-        (file://, inclusive o "abrir com" do Android) NÃO FUNCIONA.
-     2) Precisa de WebGPU (Chrome/Edge 113+, Chrome Android 121+, Safari
-        recente). Sem isso, sem fallback pra rodar modelo — mas o app
-        continua funcionando normal com o motor de padrões abaixo.
+/* =========================================================================
+   NANO BANANA OFICIAL — IA REAL LOCAL (Transformers.js, opcional)
+   -------------------------------------------------------------------------
+   Modelo de linguagem de VERDADE, local, sem chave de API. Usa a biblioteca
+   Transformers.js da Hugging Face (https://github.com/huggingface/transformers.js),
+   que roda por padrão via WASM — ou seja, direto na CPU, SEM PRECISAR DE
+   PLACA DE VÍDEO. Isso é o que mudou em relação à primeira versão (que usava
+   WebLLM e exigia WebGPU/GPU dedicada — não rodava num PC como um i7-4770
+   sem placa de vídeo).
+
+   Se o navegador tiver WebGPU disponível, a gente tenta usar (mais rápido);
+   se não tiver, ou se der erro, cai pra WASM (CPU) automaticamente — então
+   isso roda em praticamente qualquer computador, só que mais devagar quanto
+   mais fraca a CPU.
+
+   Sobre abrir o arquivo direto (file://): diferente do WebGPU (que exige
+   HTTPS/localhost sem exceção), o WASM em si não tem essa exigência — mas
+   o download do modelo depende de fetch() até a Hugging Face, e o
+   comportamento de fetch() em página file:// varia por navegador/versão.
+   Ou seja: PODE funcionar abrindo o arquivo direto, mas não é 100%
+   garantido — se não carregar, hospeda o preview.html num lugar com HTTPS
+   (GitHub Pages, Netlify, Vercel — grátis) que aí funciona com certeza.
+
    Baixa o modelo (uma vez) e guarda em cache no navegador; depois disso
    carrega rápido mesmo offline, até o navegador limpar o cache.
-   Detalhes completos: nano-banana-ia-real.js (arquivo separado).
-   ============================================================ */
+   ========================================================================= */
 
 const NANO_LLM_MODELOS = [
-  { id:'leve',        nome:'Leve · ~130 MB',        modelo:'SmolLM2-360M-Instruct-q4f16_1-MLC' },
-  { id:'equilibrado', nome:'Equilibrado · ~900 MB',  modelo:'Llama-3.2-1B-Instruct-q4f16_1-MLC' },
-  { id:'capaz',       nome:'Mais capaz · ~2,2 GB',   modelo:'Llama-3.2-3B-Instruct-q4f16_1-MLC' },
+  { id:'leve',        nome:'Leve · ~300 MB',  modelo:'onnx-community/gemma-3-270m-it-ONNX' },
+  { id:'equilibrado', nome:'Equilibrado · ~500 MB', modelo:'onnx-community/Qwen2.5-0.5B-Instruct' },
+  { id:'capaz',       nome:'Mais capaz · ~1 GB',  modelo:'onnx-community/Llama-3.2-1B-Instruct-ONNX' },
 ];
 
 window.nanoLLM = {
-  engine: null,
+  engine: null,          // função "generator" retornada pelo pipeline()
+  dispositivoUsado: null, // 'webgpu' ou 'wasm', só informativo
   carregando: false,
   nivelCarregado: null,
   nivelSelecionado: (typeof localStorage!=='undefined' && localStorage.getItem('nb_llm_nivel')) || 'equilibrado',
 };
 
 function nanoLLMSuportado(){
-  return typeof window!=='undefined' && !!window.isSecureContext && !!(typeof navigator!=='undefined' && navigator.gpu);
+  // WASM roda em praticamente qualquer navegador moderno — não exige GPU
+  // nem HTTPS. Isso aqui é só uma checagem mínima de sanidade.
+  return typeof window!=='undefined' && typeof WebAssembly!=='undefined';
 }
 
 function nanoLLMMotivoIndisponivel(){
-  if(typeof window==='undefined' || !window.isSecureContext){
-    return 'Precisa rodar via HTTPS ou http://localhost — abrir o arquivo direto (file://) não funciona pra WebGPU.';
-  }
-  if(!(typeof navigator!=='undefined' && navigator.gpu)){
-    return 'Este navegador/dispositivo não tem WebGPU disponível (ou está desatualizado).';
+  if(typeof window==='undefined' || typeof WebAssembly==='undefined'){
+    return 'Este navegador não tem suporte a WebAssembly — atualiza o navegador pra usar a IA real local.';
   }
   return '';
 }
@@ -3419,12 +3432,12 @@ function nanoLLMAtualizarUI(){
     const texto = document.getElementById('nanoLlmStatus');
     if(texto && !st.carregando){
       if(st.engine && st.nivelCarregado===st.nivelSelecionado){
-        texto.textContent = 'Modelo carregado ✅ — o modo local já responde com IA real.';
+        texto.textContent = `Modelo carregado ✅ (rodando via ${st.dispositivoUsado==='webgpu'?'GPU':'CPU'}) — o modo local já responde com IA real.`;
       }else if(st.engine){
         texto.textContent = `Modelo "${st.nivelCarregado}" carregado. Clique em carregar de novo pra trocar de nível.`;
       }else{
         const motivo = nanoLLMMotivoIndisponivel();
-        texto.textContent = motivo ? ('⚠️ ' + motivo) : 'Nenhum modelo carregado ainda — clique em "Carregar modelo".';
+        texto.textContent = motivo ? ('⚠️ ' + motivo) : 'Nenhum modelo carregado ainda — clique em "Carregar modelo". Roda em CPU, funciona sem placa de vídeo (só é mais devagar que com GPU).';
       }
     }
   }catch{}
@@ -3434,136 +3447,6 @@ function nanoLLMSelecionarNivel(id){
   window.nanoLLM.nivelSelecionado = id;
   try{ localStorage.setItem('nb_llm_nivel', id); }catch{}
   nanoLLMAtualizarUI();
-}
-
-
-/* ============================================================
-   TRANSFERÊNCIA LOCAL DO MODELO WEBLLM
-   Formato .nbmodel: pequeno cabeçalho + manifesto JSON + bytes dos
-   recursos presentes no Cache API. Isso permite exportar o cache real
-   do celular e recriá-lo no PC, sem depender de uma pasta do Chrome.
-   ============================================================ */
-const NB_MODEL_MAGIC = 'NANOBANANA-MODEL-1\n';
-
-function nanoLLMModeloSelecionado(){
-  const st = window.nanoLLM;
-  return NANO_LLM_MODELOS.find(m=>m.id===st.nivelSelecionado) || NANO_LLM_MODELOS[0];
-}
-
-function nanoLLMNormalizarNomeArquivo(s){
-  return String(s||'modelo').replace(/[^a-zA-Z0-9._-]+/g,'_').slice(0,80);
-}
-
-async function nanoLLMExportarModelo(){
-  const status=document.getElementById('nanoLlmStatus');
-  if(!('caches' in window)){
-    window.showToast?.('Este navegador não oferece Cache Storage.');
-    return;
-  }
-  const cfg=nanoLLMModeloSelecionado();
-  if(status) status.textContent='🔎 Procurando os arquivos do modelo no cache...';
-  try{
-    const cacheNames=await caches.keys();
-    const registros=[];
-    const alvo=cfg.modelo.toLowerCase();
-    for(const cacheName of cacheNames){
-      if(!/^webllm(?:\/|$)/i.test(cacheName)) continue;
-      const cache=await caches.open(cacheName);
-      const requests=await cache.keys();
-      for(const req of requests){
-        const url=req.url||'';
-        const u=url.toLowerCase();
-        // Modelo selecionado: pesos/config. O WASM compatível também é incluído
-        // quando o nome do modelo aparece na URL.
-        if(u.includes(alvo)){
-          const resp=await cache.match(req);
-          if(resp && resp.ok){
-            registros.push({cacheName,url,body:await resp.arrayBuffer(),type:resp.headers.get('content-type')||'application/octet-stream'});
-          }
-        }
-      }
-    }
-    if(!registros.length){
-      if(status) status.textContent='⚠️ Não encontrei esse modelo no cache deste navegador. Carregue o modelo primeiro.';
-      window.showToast?.('Modelo não encontrado no cache.');
-      return;
-    }
-    const manifest=registros.map((r,i)=>({i,cacheName:r.cacheName,url:r.url,size:r.body.byteLength,type:r.type}));
-    const manifestBytes=new TextEncoder().encode(JSON.stringify({format:1,modelId:cfg.modelo,createdAt:new Date().toISOString(),entries:manifest}));
-    const magicBytes=new TextEncoder().encode(NB_MODEL_MAGIC);
-    const len=new Uint8Array(4);
-    new DataView(len.buffer).setUint32(0,manifestBytes.byteLength,true);
-    const parts=[magicBytes,len,manifestBytes,...registros.map(r=>new Uint8Array(r.body))];
-    const blob=new Blob(parts,{type:'application/octet-stream'});
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download='NanoBanana_'+nanoLLMNormalizarNomeArquivo(cfg.modelo)+'.nbmodel';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(a.href),30000);
-    const mb=(blob.size/1048576).toFixed(1);
-    if(status) status.textContent=`✅ Modelo exportado: ${mb} MB em ${registros.length} arquivo(s) de cache.`;
-    window.showToast?.(`Modelo exportado: ${mb} MB`);
-  }catch(e){
-    console.error('[NanoBanana] exportação do modelo:',e);
-    if(status) status.textContent='⚠️ Falha ao exportar o modelo: '+(e?.message||'erro desconhecido');
-  }
-}
-
-function nanoLLMImportarModelo(){
-  const input=document.getElementById('nanoLlmImportFile');
-  if(!input) return;
-  input.value='';
-  input.onchange=async()=>{
-    const file=input.files?.[0];
-    if(file) await nanoLLMProcessarImportacao(file);
-  };
-  input.click();
-}
-
-async function nanoLLMProcessarImportacao(file){
-  const status=document.getElementById('nanoLlmStatus');
-  if(!('caches' in window)){
-    window.showToast?.('Este navegador não oferece Cache Storage.');
-    return;
-  }
-  try{
-    if(status) status.textContent='📥 Lendo arquivo do modelo...';
-    const buf=await file.arrayBuffer();
-    const bytes=new Uint8Array(buf);
-    const magicBytes=new TextEncoder().encode(NB_MODEL_MAGIC);
-    if(bytes.length<magicBytes.length+4) throw new Error('arquivo .nbmodel incompleto');
-    for(let i=0;i<magicBytes.length;i++) if(bytes[i]!==magicBytes[i]) throw new Error('arquivo não é um .nbmodel do Nano Banana');
-    const dv=new DataView(buf,magicBytes.length,4);
-    const manifestLen=dv.getUint32(0,true);
-    const manifestStart=magicBytes.length+4;
-    const manifestEnd=manifestStart+manifestLen;
-    if(manifestEnd>bytes.length) throw new Error('manifesto inválido');
-    const manifest=JSON.parse(new TextDecoder().decode(bytes.slice(manifestStart,manifestEnd)));
-    if(!manifest?.entries?.length) throw new Error('o arquivo não contém recursos de modelo');
-    let pos=manifestEnd;
-    for(const entry of manifest.entries){
-      const size=Number(entry.size)||0;
-      if(size<0 || pos+size>bytes.length) throw new Error('arquivo truncado');
-      const body=bytes.slice(pos,pos+size); pos+=size;
-      const cache=await caches.open(entry.cacheName);
-      await cache.put(entry.url,new Response(body,{status:200,headers:{'Content-Type':entry.type||'application/octet-stream'}}));
-    }
-    // O cache agora contém os mesmos Request URLs que o WebLLM usa.
-    // Recarregamos o motor para que ele reconheça o modelo importado.
-    if(window.nanoLLM?.engine){
-      try{ await window.nanoLLM.engine.unload?.(); }catch{}
-      window.nanoLLM.engine=null; window.nanoLLM.nivelCarregado=null;
-    }
-    const importedModelId=manifest.modelId;
-    const found=NANO_LLM_MODELOS.find(m=>m.modelo===importedModelId);
-    if(found) nanoLLMSelecionarNivel(found.id);
-    if(status) status.textContent=`✅ ${manifest.entries.length} recurso(s) importado(s). Agora clique em "Carregar modelo".`;
-    window.showToast?.('Modelo importado para o cache deste navegador.');
-  }catch(e){
-    console.error('[NanoBanana] importação do modelo:',e);
-    if(status) status.textContent='⚠️ Falha ao importar: '+(e?.message||'erro desconhecido');
-    window.showToast?.('Não foi possível importar o modelo.');
-  }
 }
 
 async function nanoLLMCarregar(){
@@ -3584,26 +3467,45 @@ async function nanoLLMCarregar(){
   if(texto) texto.textContent = 'Carregando biblioteca...';
   if(barra) barra.style.width = '2%';
 
-  try{
-    if(!window.__webllmMod){
-      window.__webllmMod = await import('https://esm.run/@mlc-ai/web-llm');
+  const progressCb = (p)=>{
+    if(p && p.status==='progress' && typeof p.progress==='number'){
+      const pct = Math.round(p.progress);
+      if(barra) barra.style.width = pct + '%';
+      if(texto) texto.textContent = `Baixando modelo... ${pct}%`;
     }
-    const { CreateMLCEngine } = window.__webllmMod;
-    const engine = await CreateMLCEngine(cfg.modelo, {
-      initProgressCallback: (p)=>{
-        const pct = Math.round((p?.progress||0)*100);
-        if(barra) barra.style.width = pct + '%';
-        if(texto) texto.textContent = (p?.text || 'Carregando modelo...') + ` (${pct}%)`;
+  };
+
+  try{
+    if(!window.__transformersMod){
+      window.__transformersMod = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers');
+    }
+    const { pipeline } = window.__transformersMod;
+    const temWebGPU = !!(typeof navigator!=='undefined' && navigator.gpu);
+    let engine, dispositivo;
+    try{
+      dispositivo = temWebGPU ? 'webgpu' : 'wasm';
+      if(texto) texto.textContent = `Carregando modelo (via ${dispositivo==='webgpu'?'GPU':'CPU'})...`;
+      engine = await pipeline('text-generation', cfg.modelo, { dtype:'q8', device:dispositivo, progress_callback:progressCb });
+    }catch(erroPrimeiraTentativa){
+      // Se a tentativa com WebGPU falhar por qualquer motivo, tenta de novo
+      // forçando CPU (WASM) — que é o caminho que funciona em qualquer PC.
+      if(dispositivo==='webgpu'){
+        console.warn('WebGPU falhou, tentando via CPU (wasm):', erroPrimeiraTentativa);
+        dispositivo = 'wasm';
+        if(texto) texto.textContent = 'Carregando modelo (via CPU)...';
+        engine = await pipeline('text-generation', cfg.modelo, { dtype:'q8', device:'wasm', progress_callback:progressCb });
+      } else {
+        throw erroPrimeiraTentativa;
       }
-    });
+    }
     st.engine = engine;
+    st.dispositivoUsado = dispositivo;
     st.nivelCarregado = cfg.id;
     if(barra) barra.style.width = '100%';
-    window.showToast?.('Modelo de IA real carregado — o modo local agora responde com IA de verdade.');
+    window.showToast?.(`Modelo de IA real carregado (via ${dispositivo==='webgpu'?'GPU':'CPU'}) — modo local agora responde com IA de verdade.`);
   }catch(e){
     const msg = String((e && e.message) || e);
-    let amigavel = 'Não consegui carregar o modelo: ' + msg;
-    if(/webgpu/i.test(msg)) amigavel = 'O navegador não conseguiu iniciar o WebGPU. ' + (nanoLLMMotivoIndisponivel() || 'Verifica se o navegador está atualizado e tenta de novo.');
+    const amigavel = 'Não consegui carregar o modelo: ' + msg + '. Se abriu o arquivo direto (file://), tenta hospedar num lugar com HTTPS (GitHub Pages/Netlify/Vercel) — o download do modelo pode depender disso.';
     if(texto) texto.textContent = '⚠️ ' + amigavel;
     if(barra) barra.style.width = '0%';
     window.showToast?.(amigavel);
@@ -3621,15 +3523,12 @@ async function nanoLLMResponder(messages){
   if(!st.engine) return null;
   const msgsFormatadas = (messages||[])
     .filter(m => m && (m.role==='user' || m.role==='assistant' || m.role==='system') && typeof m.content==='string')
-    .slice(-12); // modelo pequeno e local — contexto curto é suficiente e mais rápido
+    .slice(-12); // modelo pequeno e local — contexto curto é suficiente e mais rápido, ainda mais em CPU
   try{
-    const resposta = await st.engine.chat.completions.create({
-      messages: msgsFormatadas,
-      temperature: 0.7,
-      max_tokens: 400,
-    });
-    const texto = resposta?.choices?.[0]?.message?.content;
-    return (texto && texto.trim()) ? texto.trim() : null;
+    const saida = await st.engine(msgsFormatadas, { max_new_tokens: 200, temperature: 0.7, do_sample: true, top_p: 0.9 });
+    const ultima = saida?.[0]?.generated_text;
+    const texto = Array.isArray(ultima) ? ultima.at(-1)?.content : ultima;
+    return (texto && String(texto).trim()) ? String(texto).trim() : null;
   }catch(e){
     console.error('Nano LLM local — erro ao gerar resposta:', e);
     return null;
@@ -3668,7 +3567,7 @@ async function nanoLocalRespond(messages){
     return `Estou no **modo local do projeto** 🍌. ${extra?'Tenho o índice/contexto local disponível. ':''}Posso consultar o que estiver salvo neste dispositivo, mas não tenho o conhecimento geral de um modelo remoto.`;
   }
 
-  // 3) IA real local (WebLLM), só se já estiver carregada (arquivo
+  // 3) IA real local (Transformers.js), só se já estiver carregada (arquivo
   //    nano-banana-ia-real.js). Se não tiver, ou se der erro, cai pra base
   //    de treinamento normal — nunca trava o chat.
   if(typeof nanoLLMResponder === 'function' && window.nanoLLM && window.nanoLLM.engine){
@@ -5239,21 +5138,15 @@ Você está em uma conversa por voz em tempo real. Responda como um assistente c
           <div id="settingsNanoLLMRow" class="settings-provider-model-row" style="display:none;flex-direction:column;gap:6px;">
             <div class="setup-label">IA REAL LOCAL (OPCIONAL — BAIXA UM MODELO NO DISPOSITIVO)</div>
             <div class="model-toggle settings-model-toggle" style="flex-wrap:wrap;gap:5px;">
-              <button class="mtog" data-sg-llm="leve" onclick="nanoLLMSelecionarNivel('leve')">Leve · ~130 MB</button>
-              <button class="mtog" data-sg-llm="equilibrado" onclick="nanoLLMSelecionarNivel('equilibrado')">Equilibrado · ~900 MB</button>
-              <button class="mtog" data-sg-llm="capaz" onclick="nanoLLMSelecionarNivel('capaz')">Mais capaz · ~2,2 GB</button>
+              <button class="mtog" data-sg-llm="leve" onclick="nanoLLMSelecionarNivel('leve')">Leve · ~300 MB</button>
+              <button class="mtog" data-sg-llm="equilibrado" onclick="nanoLLMSelecionarNivel('equilibrado')">Equilibrado · ~500 MB</button>
+              <button class="mtog" data-sg-llm="capaz" onclick="nanoLLMSelecionarNivel('capaz')">Mais capaz · ~1 GB</button>
             </div>
             <div style="background:rgba(128,128,128,.25);border-radius:6px;height:8px;overflow:hidden;">
               <div id="nanoLlmBarra" style="background:#7cc576;height:100%;width:0%;transition:width .2s;"></div>
             </div>
-            <div id="nanoLlmStatus" class="setup-hint">Precisa de HTTPS ou localhost — abrir o arquivo direto (file://) não roda WebGPU. Precisa também de um navegador com WebGPU.</div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;">
-              <button class="start-btn" style="padding:8px;font-size:.9em;flex:1;min-width:145px;" onclick="nanoLLMCarregar()" type="button">⬇️ Carregar modelo</button>
-              <button class="start-btn" style="padding:8px;font-size:.9em;flex:1;min-width:145px;" onclick="nanoLLMExportarModelo()" type="button">📤 Exportar modelo</button>
-              <button class="start-btn" style="padding:8px;font-size:.9em;flex:1;min-width:145px;" onclick="nanoLLMImportarModelo()" type="button">📥 Importar modelo</button>
-            </div>
-            <input id="nanoLlmImportFile" type="file" accept=".nbmodel,application/octet-stream" style="display:none">
-            <div class="setup-hint" style="margin-top:6px;">Exporta somente os arquivos do modelo que já estão no cache do WebLLM. No PC, importe o arquivo <b>.nbmodel</b> para reconstruir o cache local.</div>
+            <div id="nanoLlmStatus" class="setup-hint">Roda em CPU (sem precisar de placa de vídeo) — só é mais devagar quanto mais fraco o processador. Baixa uma vez e fica em cache.</div>
+            <button class="start-btn" style="padding:8px;font-size:.9em;" onclick="nanoLLMCarregar()" type="button">⬇️ Carregar modelo</button>
           </div>
           <div class="key-card settings-key-card">
             <div class="key-card-header"><div class="key-card-icon">🔑</div><div class="setup-label" id="settingsKeyLabel" style="margin:0;">GOOGLE GEMINI API KEY</div></div>
