@@ -200,7 +200,7 @@ async function nanoLocalRespond(messages){
     return `Estou no **modo local do projeto** 🍌. ${extra?'Tenho o índice/contexto local disponível. ':''}Posso consultar o que estiver salvo neste dispositivo, mas não tenho o conhecimento geral de um modelo remoto.`;
   }
 
-  // 3) IA real local (WebLLM), só se já estiver carregada (arquivo
+  // 3) IA real local (Transformers.js), só se já estiver carregada (arquivo
   //    nano-banana-ia-real.js). Se não tiver, ou se der erro, cai pra base
   //    de treinamento normal — nunca trava o chat.
   if(typeof nanoLLMResponder === 'function' && window.nanoLLM && window.nanoLLM.engine){
